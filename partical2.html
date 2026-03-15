@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cyberpunk Energy Interface</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden; /* Hide scrollbars */
+            background-color: #020205; /* Deep dark background */
+        }
+        canvas {
+            display: block; /* Removes default margin */
+        }
+        .ui-text {
+            position: absolute;
+            bottom: 30px;
+            width: 100%;
+            text-align: center;
+            color: rgba(0, 255, 255, 0.4);
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 14px;
+            letter-spacing: 4px;
+            pointer-events: none; /* Let mouse pass through text */
+            text-transform: uppercase;
+        }
+    </style>
+    <!-- Import p5.js library for graphics and physics -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+</head>
+<body>
+
+    <div class="ui-text">System Active // Move Cursor to Manipulate Energy</div>
+
+    <script>
+        // --- CONFIGURATION ---
+        const PARTICLE_COUNT = 450;
+        const NEON_CYAN = [0, 240, 255];
+        const NEON_PURPLE = [180, 0, 255];
+        
+        let particles = [];
+
+        function setup() {
+            createCanvas(windowWidth, windowHeight);
+            
+            // Initialize the particle system
+            for (let i = 0; i < PARTICLE_COUNT; i++) {
+                particles.push(new Particle());
+            }
+        }
+
+        function draw() {
+            // 1. Draw Background with slight transparency for "Trails" effect
+            // R, G, B, Alpha (0-255)
+            background(5, 5, 12, 40);
+
+            // 2. Enable Additive Blending
+            // This makes overlapping particles glow brightly (Light Physics)
+            blendMode(ADD);
+
+            // 3. Update all particles
+            let mouse = createVector(mouseX, mouseY);
+            
+            for (let p of particles) {
+                p.behaviors(mouse);
+                p.update();
+                p.show();
+            }
+
+            // Reset blend mode so the background draws correctly next frame
+            blendMode(BLEND);
+        }
+
+        // --- PARTICLE CLASS ---
+        class Particle {
+            constructor() {
+                this.pos = createVector(random(width), random(height));
+                this.vel = p5.Vector.random2D();
+                this.acc = createVector(0, 0);
+                
+                // Physics properties
+                this.maxSpeed = random(4, 8);
+                this.maxForce = random(0.2, 0.5);
+                this.size = random(2, 5);
+                
+                // Assign Color
+                // 60% chance of Cyan, 40% Purple
+                if (random(1) > 0.4) {
+                    this.color = color(NEON_CYAN[0], NEON_CYAN[1], NEON_CYAN[2], 180);
+                } else {
+                    this.color = color(NEON_PURPLE[0], NEON_PURPLE[1], NEON_PURPLE[2], 180);
+                }
+            }
+
+            behaviors(target) {
+                let seek = this.seek(target);
+                
+                // If mouse is pressed, they scatter; otherwise they attract
+                if (mouseIsPressed) {
+                    seek.mult(-2); // Repel
+                } else {
+                    seek.mult(1.5); // Attract
+                }
+                
+                this.applyForce(seek);
+            }
+
+            applyForce(force) {
+                this.acc.add(force);
+            }
+
+            seek(target) {
+                let desired = p5.Vector.sub(target, this.pos);
+                let d = desired.mag();
+
+                // Ease-in effect: slow down when close to the target
+                if (d < 100) {
+                    let m = map(d, 0, 100, 0, this.maxSpeed);
+                    desired.setMag(m);
+                } else {
+                    desired.setMag(this.maxSpeed);
+                }
+
+                let steer = p5.Vector.sub(desired, this.vel);
+                steer.limit(this.maxForce);
+                return steer;
+            }
+
+            update() {
+                this.vel.add(this.acc);
+                this.pos.add(this.vel);
+                this.acc.mult(0); // Clear acceleration
+
+                // Jitter movement for "energy" feel
+                this.pos.x += random(-0.5, 0.5);
+                this.pos.y += random(-0.5, 0.5);
+            }
+
+            show() {
+                noStroke();
+                fill(this.color);
+                circle(this.pos.x, this.pos.y, this.size);
+            }
+        }
+
+        // Resize canvas if user resizes browser window
+        function windowResized() {
+            resizeCanvas(windowWidth, windowHeight);
+        }
+    </script>
+</body>
+</html>
