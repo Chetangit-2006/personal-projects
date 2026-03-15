@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Hand-Controlled Particles</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            color: white;
+        }
+
+        /* Video element hidden, used for processing */
+        #input-video {
+            display: none;
+        }
+
+        /* UI Overlay */
+        #ui-container {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            pointer-events: none; /* Let clicks pass through to canvas if needed */
+        }
+
+        .panel {
+            background: rgba(20, 20, 30, 0.6);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            pointer-events: auto;
+            width: 250px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+
+        h2 {
+            margin: 0 0 15px 0;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: #aaa;
+        }
+
+        /* Buttons */
+        .btn-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        button {
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            padding: 10px;
+            color: white;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 12px;
+        }
+
+        button:hover, button.active {
+            background: #00d2ff;
+            color: black;
+            font-weight: bold;
+        }
+
+        /* Color Picker */
+        .color-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-top: 10px;
+        }
+        
+        input[type="color"] {
+            border: none;
+            width: 40px;
+            height: 40px;
+            cursor: pointer;
+            background: none;
+        }
+
+        /* Status Indicator */
+        #status {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.5);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            color: #00ff88;
+            opacity: 0.8;
+        }
+
+        .loading { color: #ffcc00 !important; }
+    </style>
+
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- MediaPipe Hands -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+    <!-- Webcam Video (Hidden) -->
+    <video id="input-video"></video>
+
+    <!-- UI -->
+    <div id="ui-container">
+        <div class="panel">
+            <h2>Templates</h2>
+            <div class="btn-grid">
+                <button onclick="setTemplate('flower')" class="active" id="btn-flower">Hot Flower</button>
+                <button onclick="setTemplate('saturn')" id="btn-saturn">Saturn</button>
+                <button onclick="setTemplate('fireworks')" id="btn-fireworks">Fireworks</button>
+                <button onclick="setTemplate('helix')" id="btn-helix">Helix DNA</button>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2>Appearance</h2>
+            <div class="color-row">
+                <span>Particle Color</span>
+                <input type="color" id="colorPicker" value="#00d2ff">
+            </div>
+            <div style="margin-top:15px; font-size: 11px; color: #888;">
+                <p>👐 <strong>Distance:finger</strong> Controls Scale</p>
+                <p>✊ <strong>Fist:</strong> Adds Tension/Chaos</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="status" class="loading">Initializing Camera & AI...</div>
+
+    <script>
+        // --- 1. CONFIGURATION & STATE ---
+        const config = {
+            particleCount: 15000,
+            baseColor: 0x00d2ff,
+            template: 'flower'
+        };
+
+        let handState = {
+            distance: 1,      // 0 to 2 (Distance between hands)
+            tension: 0,       // 0 to 1 (Based on fist clench)
+            isActive: false   // Are hands detected?
+        };
+
+        // --- 2. THREE.JS SETUP ---
+        const scene = new THREE.Scene();
+        // Fog for depth
+        scene.fog = new THREE.FogExp2(0x050505, 0.002);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 30;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        // --- 3. PARTICLE SYSTEM ENGINE ---
+        let particlesGeometry, particlesMaterial, particleSystem;
+        let originalPositions = []; // Store base shape positions
+        let velocities = [];        // For fireworks/movement
+
+        function initParticles() {
+            if(particleSystem) scene.remove(particleSystem);
+
+            particlesGeometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(config.particleCount * 3);
+            originalPositions = new Float32Array(config.particleCount * 3);
+            velocities = new Float32Array(config.particleCount * 3);
+
+            // Generate based on current template
+            for (let i = 0; i < config.particleCount; i++) {
+                let x, y, z;
+                
+                if (config.template === 'flower') {
+                    // Rose/Flower Math
+                    const theta = Math.random() * Math.PI * 2;
+                    const phi = Math.random() * Math.PI;
+                    const r = 10 * (1 + Math.sin(5 * theta) * Math.sin(phi));
+                    x = r * Math.sin(phi) * Math.cos(theta);
+                    y = r * Math.sin(phi) * Math.sin(theta);
+                    z = r * Math.cos(phi);
+                } 
+                else if (config.template === 'saturn') {
+                    // Planet + Ring
+                    const isRing = Math.random() > 0.3;
+                    if(isRing) {
+                        const angle = Math.random() * Math.PI * 2;
+                        const dist = 12 + Math.random() * 8;
+                        x = Math.cos(angle) * dist;
+                        y = (Math.random() - 0.5) * 0.5; // Flat
+                        z = Math.sin(angle) * dist;
+                    } else {
+                        // Sphere
+                        const r = 6;
+                        const theta = Math.random() * Math.PI * 2;
+                        const phi = Math.acos(2 * Math.random() - 1);
+                        x = r * Math.sin(phi) * Math.cos(theta);
+                        y = r * Math.sin(phi) * Math.sin(theta);
+                        z = r * Math.cos(phi);
+                    }
+                }
+                else if (config.template === 'fireworks') {
+                    x = 0; y = 0; z = 0;
+                    // For fireworks, we store velocity in originalPositions for convenience in logic below
+                    const theta = Math.random() * Math.PI * 2;
+                    const phi = Math.acos(2 * Math.random() - 1);
+                    const speed = 0.5 + Math.random() * 0.5;
+                    velocities[i*3] = speed * Math.sin(phi) * Math.cos(theta);
+                    velocities[i*3+1] = speed * Math.sin(phi) * Math.sin(theta);
+                    velocities[i*3+2] = speed * Math.cos(phi);
+                }
+                else if (config.template === 'helix') {
+                    const t = Math.random() * 20 * Math.PI; // tallness
+                    const radius = 5;
+                    x = radius * Math.cos(t);
+                    z = radius * Math.sin(t);
+                    y = (Math.random() * 40) - 20; // Spread vertically
+                    // Add slight double helix offset
+                    if (Math.random() > 0.5) {
+                        x = radius * Math.cos(t + Math.PI);
+                        z = radius * Math.sin(t + Math.PI);
+                    }
+      
+
+                }
+
+                positions[i * 3] = x;
+                positions[i * 3 + 1] = y;
+                positions[i * 3 + 2] = z;
+
+                originalPositions[i * 3] = x;
+                originalPositions[i * 3 + 1] = y;
+                originalPositions[i * 3 + 2] = z;
+            }
+
+            particlesGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+            // Texture for soft particle
+            const sprite = new THREE.TextureLoader().load('https://threejs.org/examples/textures/sprites/disc.png');
+
+            particlesMaterial = new THREE.PointsMaterial({
+                color: config.baseColor,
+                size: 0.5,
+                map: sprite,
+                transparent: true,
+                alphaTest: 0.5,
+                blending: THREE.AdditiveBlending
+            });
+
+            particleSystem = new THREE.Points(particlesGeometry, particlesMaterial);
+            scene.add(particleSystem);
+        }
+
+        // --- 4. INTERACTION LOGIC (MediaPipe) ---
+        const videoElement = document.getElementById('input-video');
+        const statusEl = document.getElementById('status');
+
+        function onResults(results) {
+            statusEl.innerText = "Tracking Active";
+            statusEl.classList.remove('loading');
+            statusEl.style.color = "#00ff88";
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length === 2) {
+                handState.isActive = true;
+
+                const hand1 = results.multiHandLandmarks[0];
+                const hand2 = results.multiHandLandmarks[1];
+
+                // 1. Calculate Centroids (approximate palm position)
+                // Wrist is index 0, Middle finger knuckle is 9
+                const h1Pos = { x: hand1[9].x, y: hand1[9].y };
+                const h2Pos = { x: hand2[9].x, y: hand2[9].y };
+
+                // 2. Calculate Distance between hands (Scale factor)
+                // Simple Euclidean distance in normalized screen space
+                const dist = Math.sqrt(
+                    Math.pow(h1Pos.x - h2Pos.x, 2) + 
+                    Math.pow(h1Pos.y - h2Pos.y, 2)
+                );
+                
+                // Map distance: typically 0.1 (close) to 0.8 (far) -> Scale 0.2 to 2.0
+                handState.distance = THREE.MathUtils.mapLinear(dist, 0.1, 0.8, 0.5, 2.5);
+
+                // 3. Calculate "Tension" (Are hands closed?)
+                // Compare distance between Wrist(0) and Middle Tip(12)
+                const isFist = (hand) => {
+                    const d = Math.sqrt(
+                        Math.pow(hand[0].x - hand[12].x, 2) + 
+                        Math.pow(hand[0].y - hand[12].y, 2)
+                    );
+                    return d < 0.15; // Threshold for fist
+                };
+
+                const f1 = isFist(hand1);
+                const f2 = isFist(hand2);
+
+                if (f1 && f2) handState.tension = 1.0;
+                else if (f1 || f2) handState.tension = 0.5;
+                else handState.tension = 0;
+
+            } else {
+                handState.isActive = false;
+                // Gently return to default state
+                handState.distance = THREE.MathUtils.lerp(handState.distance, 1, 0.05);
+                handState.tension = THREE.MathUtils.lerp(handState.tension, 0, 0.05);
+            }
+        }
+
+        const hands = new Hands({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }});
+
+        hands.setOptions({
+            maxNumHands: 2,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        hands.onResults(onResults);
+
+        const cameraUtils = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({image: videoElement});
+            },
+            width: 640,
+            height: 480
+        });
+        cameraUtils.start();
+
+        // --- 5. ANIMATION LOOP ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const time = clock.getElapsedTime();
+            const positions = particlesGeometry.attributes.position.array;
+
+            // --- INTERACTION HANDLING ---
+            // Smoothly interpolate scale based on hand distance
+            const targetScale = handState.distance;
+            particleSystem.scale.setScalar(THREE.MathUtils.lerp(particleSystem.scale.x, targetScale, 0.1));
+
+            // Tension creates vibration/jitter
+            const vibration = handState.tension * 0.2; 
+
+            // Rotate entire system slowly
+            particleSystem.rotation.y += 0.002 + (handState.tension * 0.05);
+
+            for (let i = 0; i < config.particleCount; i++) {
+                const px = i * 3;
+                const py = i * 3 + 1;
+                const pz = i * 3 + 2;
+
+                if (config.template === 'fireworks') {
+                    // Unique logic for fireworks: Move outward, reset on center
+                    positions[px] += velocities[px] * (0.1 + vibration);
+                    positions[py] += velocities[py] * (0.1 + vibration);
+                    positions[pz] += velocities[pz] * (0.1 + vibration);
+
+                    // Reset if too far
+                    const d = Math.sqrt(positions[px]**2 + positions[py]**2 + positions[pz]**2);
+                    if (d > 30) {
+                        positions[px] = 0; positions[py] = 0; positions[pz] = 0;
+                    }
+                } else {
+                    // Standard logic: Keep shape, add noise/wave
+                    
+                    // Recover original shape
+                    let ox = originalPositions[px];
+                    let oy = originalPositions[py];
+                    let oz = originalPositions[pz];
+
+                    // Add some wave movement
+                    const wave = Math.sin(time + ox * 0.5) * 0.2 ;
+                    
+                    // Add vibration from fist clenching
+                    const jitterX = (Math.random() - 0.5) * vibration * 2;
+                    const jitterY = (Math.random() - 0.5) * vibration * 2;
+                    const jitterZ = (Math.random() - 0.5) * vibration * 2;
+
+                    positions[px] = ox + jitterX;
+                    positions[py] = oy + wave + jitterY;
+                    positions[pz] = oz + jitterZ;
+                }
+            }	
+
+            particlesGeometry.attributes.position.needsUpdate = true;
+            renderer.render(scene, camera);
+        }
+
+        // --- 6. UI HELPERS ---
+        function setTemplate(name) {
+            config.template = name;
+            
+            // Update buttons UI
+            document.querySelectorAll('.btn-grid button').forEach(b => b.classList.remove('active'));
+            document.getElementById(`btn-${name}`).classList.add('active');
+
+            initParticles();
+        }
+
+        document.getElementById('colorPicker').addEventListener('input', (e) => {
+            config.baseColor = e.target.value;
+            if(particlesMaterial) {
+                particlesMaterial.color.set(e.target.value);
+            }
+        });
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;		
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Initialize
+        initParticles();
+        animate();
+
+    </script>
+</body>
+</html>
