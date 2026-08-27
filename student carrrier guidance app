@@ -1,4 +1,4 @@
-//main block
+//agent.py-backend
 import os
 import json
 
@@ -434,4 +434,802 @@ Explain your reasoning clearly.
         input=prompt
     )
 
-    return response.output_text
+  return response.output_text
+
+
+
+
+
+//database.ppy-backend
+import sqlite3
+
+DATABASE = "career_ai.db"
+
+
+def get_connection():
+    connection = sqlite3.connect(DATABASE)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def initialize_database():
+    connection = get_connection()
+
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS students (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            education TEXT,
+            year TEXT,
+            interests TEXT,
+            skills TEXT,
+            goals TEXT
+        )
+    """)
+
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS progress (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id INTEGER,
+            skill TEXT,
+            progress INTEGER DEFAULT 0,
+            FOREIGN KEY(student_id) REFERENCES students(id)
+        )
+    """)
+
+    connection.commit()
+    connection.close()
+
+
+def save_student(student):
+    connection = get_connection()
+
+    cursor = connection.execute("""
+        INSERT INTO students
+        (name, education, year, interests, skills, goals)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (
+        student["name"],
+        student["education"],
+        student["year"],
+        ",".join(student["interests"]),
+        ",".join(student["skills"]),
+        ",".join(student["goals"])
+    ))
+
+    connection.commit()
+
+    student_id = cursor.lastrowid
+
+    connection.close()
+
+    return student_id
+
+
+
+
+
+
+//main.py-backend
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from models import StudentProfile, ChatRequest
+from agents import CareerOrchestrator, chat_with_ai
+from database import initialize_database, save_student
+
+
+# ============================================================
+# CREATE FASTAPI APPLICATION
+# ============================================================
+
+app = FastAPI(
+    title="CareerAI",
+    description="Agentic AI Career Guidance System",
+    version="1.0.0"
+)
+
+
+# ============================================================
+# CORS CONFIGURATION
+# ============================================================
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
+
+
+# ============================================================
+# INITIALIZE DATABASE
+# ============================================================
+
+try:
+    initialize_database()
+except Exception as e:
+    print("Database initialization error:", e)
+
+
+# ============================================================
+# CREATE CAREER ORCHESTRATOR
+# ============================================================
+
+orchestrator = CareerOrchestrator()
+
+
+# ============================================================
+# HOME ROUTE
+# ============================================================
+
+@app.get("/")
+def home():
+
+    return {
+        "status": "success",
+        "message": "CareerAI Agentic AI Backend is Running",
+        "version": "1.0.0",
+        "agents": [
+            "Profile Agent",
+            "Career Recommendation Agent",
+            "Skill Gap Agent",
+            "Course Recommendation Agent",
+            "Roadmap Agent",
+            "Progress Agent",
+            "AI Counselor Agent"
+        ]
+    }
+
+
+# ============================================================
+# HEALTH CHECK
+# ============================================================
+
+@app.get("/health")
+def health():
+
+    return {
+        "status": "healthy",
+        "service": "CareerAI"
+    }
+
+
+# ============================================================
+# API INFORMATION
+# ============================================================
+
+@app.get("/api")
+def api_info():
+
+    return {
+
+        "application": "CareerAI",
+
+        "description":
+            "Agentic AI Career Guidance System",
+
+        "endpoints": {
+
+            "home":
+                "GET /",
+
+            "health":
+                "GET /health",
+
+            "analyze":
+                "POST /api/analyze",
+
+            "chat":
+                "POST /api/chat"
+
+        }
+
+    }
+
+
+# ============================================================
+# CAREER ANALYSIS
+# ============================================================
+
+@app.post("/api/analyze")
+def analyze_profile(profile: StudentProfile):
+
+    try:
+
+        # ----------------------------------------------------
+        # Convert profile into database format
+        # ----------------------------------------------------
+
+        student_data = {
+
+            "name":
+                profile.name,
+
+            "education":
+                profile.education,
+
+            "year":
+                profile.year,
+
+            "interests":
+                profile.interests,
+
+            "skills":
+                list(profile.skills.keys()),
+
+            "goals":
+                profile.goals
+
+        }
+
+
+        # ----------------------------------------------------
+        # Save student
+        # ----------------------------------------------------
+
+        student_id = save_student(
+            student_data
+        )
+
+
+        # ----------------------------------------------------
+        # Run Agentic AI System
+        # ----------------------------------------------------
+
+        result = orchestrator.run(
+            profile
+        )
+
+
+        # ----------------------------------------------------
+        # Add student ID
+        # ----------------------------------------------------
+
+        result["student_id"] = student_id
+
+
+        # ----------------------------------------------------
+        # Return result
+        # ----------------------------------------------------
+
+        return {
+
+            "status":
+                "success",
+
+            "data":
+                result
+
+        }
+
+
+    except Exception as e:
+
+        return {
+
+            "status":
+                "error",
+
+            "message":
+                str(e)
+
+        }
+
+
+# ============================================================
+# AI CHATBOT
+# ============================================================
+
+@app.post("/api/chat")
+def chat(request: ChatRequest):
+
+    try:
+
+        response = chat_with_ai(
+
+            request.message,
+
+            request.profile
+
+        )
+
+
+        return {
+
+            "status":
+                "success",
+
+            "response":
+                response
+
+        }
+
+
+    except Exception as e:
+
+        return {
+
+            "status":
+                "error",
+
+            "response":
+                "Unable to process your question.",
+
+            "error":
+                str(e)
+
+        }
+
+
+# ============================================================
+# TEST AGENT SYSTEM
+# ============================================================
+
+@app.get("/api/test-agents")
+def test_agents():
+
+    return {
+
+        "status":
+            "success",
+
+        "message":
+            "All CareerAI agents are registered.",
+
+        "agents": {
+
+            "profile_agent":
+                "Analyzes student profile",
+
+            "career_agent":
+                "Finds suitable careers",
+
+            "skill_gap_agent":
+                "Identifies missing skills",
+
+            "course_agent":
+                "Recommends courses",
+
+            "roadmap_agent":
+                "Creates learning roadmap",
+
+            "progress_agent":
+                "Tracks learning progress",
+
+            "ai_counselor_agent":
+                "Provides conversational career guidance"
+
+        }
+
+    }
+
+
+# ============================================================
+# SERVER ENTRY POINT
+# ============================================================
+
+if __name__ == "__main__":
+
+    import uvicorn
+
+    uvicorn.run(
+        "main:app",
+        host="127.0.0.1",
+        port=8000,
+        reload=True
+    )
+
+
+
+
+
+//model.py
+from pydantic import BaseModel
+from typing import List, Dict
+class StudentProfile(BaseModel):
+    name: str
+    education: str
+    year: str
+    interests: List[str]
+    skills: Dict[str, int]
+    goals: List[str]
+
+
+class ChatRequest(BaseModel):
+    message: str
+    profile: StudentProfile
+
+//requirement-backend
+fastapi
+uvicorn
+pydantic
+python-dotenv
+openai
+
+
+
+
+//index.html-frontend
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
+
+    <title>CareerAI</title>
+
+    <link rel="stylesheet"
+          href="style.css">
+
+</head>
+
+<body>
+
+<div class="background"></div>
+
+<header>
+
+    <div class="logo">
+        🚀 Career<span>AI</span>
+    </div>
+
+    <div class="status">
+        ● AI AGENT ONLINE
+    </div>
+
+</header>
+
+
+<main>
+
+    <section class="hero">
+
+        <div class="hero-text">
+
+            <div class="badge">
+                ✨ AGENTIC AI CAREER COUNSELOR
+            </div>
+
+            <h1>
+                Find the career
+                <span>made for you.</span>
+            </h1>
+
+            <p>
+                CareerAI analyzes your interests, skills and goals
+                to build a personalized career roadmap.
+            </p>
+
+            <button
+                onclick="startAssessment()"
+                class="primary-btn">
+
+                Start Career Assessment →
+            
+            </button>
+
+        </div>
+
+
+        <div class="ai-card">
+
+            <div class="orb">
+                ✨
+            </div>
+
+            <h3>
+                Your AI Career Agent
+            </h3>
+
+            <p>
+                Analyze → Recommend → Plan → Track
+            </p>
+
+            <div class="mini-stats">
+
+                <div>
+                    <strong>7</strong>
+                    <small>AI Agents</small>
+                </div>
+
+                <div>
+                    <strong>∞</strong>
+                    <small>Career Paths</small>
+                </div>
+
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <section
+        id="assessment"
+        class="assessment hidden">
+
+        <h2>
+            Let's understand you.
+        </h2>
+
+        <p>
+            Answer a few questions to build your AI profile.
+        </p>
+
+
+        <form id="careerForm">
+
+            <div class="input-grid">
+
+                <div class="input-group">
+
+                    <label>Name</label>
+
+                    <input
+                        id="name"
+                        required
+                        placeholder="Your name">
+
+                </div>
+
+
+                <div class="input-group">
+
+                    <label>Education</label>
+
+                    <input
+                        id="education"
+                        required
+                        placeholder="e.g. BTech CSE">
+
+                </div>
+
+
+                <div class="input-group">
+
+                    <label>Year</label>
+
+                    <select id="year">
+
+                        <option>1st Year</option>
+                        <option>2nd Year</option>
+                        <option>3rd Year</option>
+                        <option>4th Year</option>
+
+                    </select>
+
+                </div>
+
+
+                <div class="input-group">
+
+                    <label>Interests</label>
+
+                    <input
+                        id="interests"
+                        required
+                        placeholder="AI, Programming, Design">
+
+                </div>
+
+
+                <div class="input-group">
+
+                    <label>Skills</label>
+
+                    <input
+                        id="skills"
+                        required
+                        placeholder="Python, SQL, Java">
+
+                </div>
+
+
+                <div class="input-group">
+
+                    <label>Career Goals</label>
+
+                    <input
+                        id="goals"
+                        required
+                        placeholder="High salary, MNC, Research">
+
+                </div>
+
+            </div>
+
+
+            <button
+                type="submit"
+                class="primary-btn">
+
+                Analyze My Career 🚀
+
+            </button>
+
+        </form>
+
+    </section>
+
+
+    <section
+        id="dashboard"
+        class="dashboard hidden">
+
+        <div class="dashboard-header">
+
+            <div>
+
+                <div class="badge">
+                    AI ANALYSIS COMPLETE
+                </div>
+
+                <h2 id="welcome">
+                    Your Career Dashboard
+                </h2>
+
+            </div>
+
+        </div>
+
+
+        <div class="career-hero">
+
+            <div>
+
+                <small>
+                    BEST CAREER MATCH
+                </small>
+
+                <h1 id="bestCareer">
+                    AI/ML Engineer
+                </h1>
+
+                <p>
+                    Recommended by your Career Analysis Agent.
+                </p>
+
+            </div>
+
+            <div class="match-score">
+
+                <strong id="matchScore">
+                    0%
+                </strong>
+
+                <span>
+                    Match
+                </span>
+
+            </div>
+
+        </div>
+
+
+        <div class="cards">
+
+            <div class="card">
+
+                <div class="icon">
+                    🎯
+                </div>
+
+                <h3>
+                    Career Matches
+                </h3>
+
+                <div id="careers"></div>
+
+            </div>
+
+
+            <div class="card">
+
+                <div class="icon">
+                    🧠
+                </div>
+
+                <h3>
+                    Skill Gaps
+                </h3>
+
+                <div id="skills"></div>
+
+            </div>
+
+
+            <div class="card">
+
+                <div class="icon">
+                    📚
+                </div>
+
+                <h3>
+                    Recommended Learning
+                </h3>
+
+                <div id="courses"></div>
+
+            </div>
+
+        </div>
+
+
+        <div class="card roadmap">
+
+            <div class="roadmap-title">
+
+                <div>
+
+                    <div class="icon">
+                        🗺️
+                    </div>
+
+                    <h3>
+                        Personalized Roadmap
+                    </h3>
+
+                </div>
+
+                <span>
+                    AI GENERATED
+                </span>
+
+            </div>
+
+            <div id="roadmap"></div>
+
+        </div>
+
+
+        <div class="chat-section">
+
+            <h2>
+                Ask your Career Agent
+            </h2>
+
+            <div
+                id="chatMessages"
+                class="chat-messages">
+
+                <div class="bot-message">
+                    👋 Hi! I'm your Career Agent.
+                    Ask me anything about your career.
+                </div>
+
+            </div>
+
+
+            <div class="chat-input">
+
+                <input
+                    id="chatInput"
+                    placeholder="Ask: Should I learn AI or cybersecurity?">
+
+                <button
+                    onclick="sendMessage()">
+
+                    ➤
+
+                </button>
+
+            </div>
+
+        </div>
+
+    </section>
+
+</main>
+
+
+<script src="script.js"></script>
+
+</body>
+
+</html>
