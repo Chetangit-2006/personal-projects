@@ -1593,7 +1593,7 @@ function addMessage(
 
 
 
-//style.js-frontend
+//style.css-frontend
 * {
     margin: 0;
     padding: 0;
