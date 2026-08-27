@@ -1,1 +1,437 @@
+//main block
+import os
+import json
 
+from dotenv import load_dotenv
+from openai import OpenAI
+
+load_dotenv()
+# -------------------------------------------------
+# AI CLIENT
+# -------------------------------------------------
+
+client = None
+
+if os.getenv("OPENAI_API_KEY"):
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+
+# -------------------------------------------------
+# CAREER DATABASE
+# -------------------------------------------------
+
+CAREERS = {
+
+    "AI/ML Engineer": {
+        "interests": [
+            "AI",
+            "Machine Learning",
+            "Programming",
+            "Mathematics",
+            "Problem Solving",
+            "Data Science"
+        ],
+        "skills": [
+            "Python",
+            "Statistics",
+            "Machine Learning",
+            "Deep Learning",
+            "SQL",
+            "Git"
+        ],
+        "goals": [
+            "High salary",
+            "Technology",
+            "Research",
+            "MNC"
+        ]
+    },
+
+    "Software Engineer": {
+        "interests": [
+            "Programming",
+            "Software Development",
+            "Problem Solving",
+            "Technology"
+        ],
+        "skills": [
+            "Programming",
+            "Data Structures",
+            "Algorithms",
+            "Git",
+            "Database"
+        ],
+        "goals": [
+            "High salary",
+            "MNC",
+            "Job security"
+        ]
+    },
+
+    "Data Scientist": {
+        "interests": [
+            "Data Science",
+            "Mathematics",
+            "Statistics",
+            "AI",
+            "Problem Solving"
+        ],
+        "skills": [
+            "Python",
+            "Statistics",
+            "SQL",
+            "Machine Learning",
+            "Data Analysis"
+        ],
+        "goals": [
+            "Research",
+            "High salary",
+            "Technology"
+        ]
+    },
+
+    "Cybersecurity Analyst": {
+        "interests": [
+            "Cybersecurity",
+            "Networking",
+            "Problem Solving",
+            "Technology"
+        ],
+        "skills": [
+            "Networking",
+            "Linux",
+            "Python",
+            "Cybersecurity",
+            "Ethical Hacking"
+        ],
+        "goals": [
+            "Job security",
+            "Technology",
+            "Government job"
+        ]
+    },
+
+    "Cloud Engineer": {
+        "interests": [
+            "Cloud",
+            "Networking",
+            "Technology",
+            "Programming"
+        ],
+        "skills": [
+            "Linux",
+            "AWS",
+            "Docker",
+            "Networking",
+            "Python"
+        ],
+        "goals": [
+            "High salary",
+            "MNC",
+            "Remote work"
+        ]
+    }
+}
+
+
+# -------------------------------------------------
+# PROFILE AGENT
+# -------------------------------------------------
+
+class ProfileAgent:
+
+    def analyze(self, profile):
+
+        strongest_skills = sorted(
+            profile.skills.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+
+        return {
+            "name": profile.name,
+            "education": profile.education,
+            "year": profile.year,
+            "top_skills": [
+                skill for skill, score in strongest_skills[:5]
+            ],
+            "interests": profile.interests,
+            "goals": profile.goals
+        }
+
+
+# -------------------------------------------------
+# CAREER AGENT
+# -------------------------------------------------
+
+class CareerAgent:
+
+    def recommend(self, profile):
+
+        results = []
+
+        student_interests = [
+            item.lower()
+            for item in profile.interests
+        ]
+
+        student_skills = [
+            item.lower()
+            for item in profile.skills.keys()
+        ]
+
+        student_goals = [
+            item.lower()
+            for item in profile.goals
+        ]
+
+        for career, data in CAREERS.items():
+
+            interest_matches = sum(
+                1 for interest in data["interests"]
+                if interest.lower() in student_interests
+            )
+
+            skill_matches = sum(
+                1 for skill in data["skills"]
+                if skill.lower() in student_skills
+            )
+
+            goal_matches = sum(
+                1 for goal in data["goals"]
+                if goal.lower() in student_goals
+            )
+
+            interest_score = (
+                interest_matches / len(data["interests"])
+            ) * 100
+
+            skill_score = (
+                skill_matches / len(data["skills"])
+            ) * 100
+
+            goal_score = (
+                goal_matches / len(data["goals"])
+            ) * 100
+
+            final_score = (
+                interest_score * 0.4
+                + skill_score * 0.4
+                + goal_score * 0.2
+            )
+
+            results.append({
+                "career": career,
+                "score": round(final_score),
+                "interest_score": round(interest_score),
+                "skill_score": round(skill_score),
+                "goal_score": round(goal_score)
+            })
+
+        results.sort(
+            key=lambda x: x["score"],
+            reverse=True
+        )
+
+        return results
+
+
+# -------------------------------------------------
+# SKILL GAP AGENT
+# -------------------------------------------------
+
+class SkillGapAgent:
+
+    def analyze(self, profile, career):
+
+        required = CAREERS[career]["skills"]
+
+        current = [
+            skill.lower()
+            for skill in profile.skills.keys()
+        ]
+
+        missing = []
+        available = []
+
+        for skill in required:
+
+            if skill.lower() in current:
+                available.append(skill)
+            else:
+                missing.append(skill)
+
+        return {
+            "career": career,
+            "available_skills": available,
+            "missing_skills": missing
+        }
+
+
+# -------------------------------------------------
+# COURSE AGENT
+# -------------------------------------------------
+
+class CourseAgent:
+
+    COURSES = {
+        "Python": "Python Programming Fundamentals",
+        "Statistics": "Statistics for Data Science",
+        "Machine Learning": "Machine Learning Fundamentals",
+        "Deep Learning": "Deep Learning with Neural Networks",
+        "SQL": "SQL and Database Fundamentals",
+        "Git": "Git and GitHub",
+        "Networking": "Computer Networking Fundamentals",
+        "Linux": "Linux Administration",
+        "AWS": "AWS Cloud Fundamentals",
+        "Docker": "Docker and Containers"
+    }
+
+    def recommend(self, missing_skills):
+
+        courses = []
+
+        for skill in missing_skills:
+
+            if skill in self.COURSES:
+                courses.append({
+                    "skill": skill,
+                    "course": self.COURSES[skill]
+                })
+
+        return courses
+
+
+# -------------------------------------------------
+# ROADMAP AGENT
+# -------------------------------------------------
+
+class RoadmapAgent:
+
+    def create(self, missing_skills):
+
+        roadmap = []
+
+        for index, skill in enumerate(
+            missing_skills,
+            start=1
+        ):
+
+            roadmap.append({
+                "week": index,
+                "skill": skill,
+                "task": f"Learn {skill} and complete one practical exercise."
+            })
+
+        return roadmap
+
+
+# -------------------------------------------------
+# PROGRESS AGENT
+# -------------------------------------------------
+
+class ProgressAgent:
+
+    def update(self, roadmap, completed_weeks):
+
+        total = len(roadmap)
+
+        if total == 0:
+            return 100
+
+        percentage = (
+            completed_weeks / total
+        ) * 100
+
+        return round(percentage)
+
+
+# -------------------------------------------------
+# ORCHESTRATOR
+# -------------------------------------------------
+
+class CareerOrchestrator:
+
+    def __init__(self):
+
+        self.profile_agent = ProfileAgent()
+        self.career_agent = CareerAgent()
+        self.skill_agent = SkillGapAgent()
+        self.course_agent = CourseAgent()
+        self.roadmap_agent = RoadmapAgent()
+
+    def run(self, profile):
+
+        # Agent 1
+        profile_analysis = self.profile_agent.analyze(
+            profile
+        )
+
+        # Agent 2
+        careers = self.career_agent.recommend(
+            profile
+        )
+
+        best_career = careers[0]["career"]
+
+        # Agent 3
+        skill_gap = self.skill_agent.analyze(
+            profile,
+            best_career
+        )
+
+        # Agent 4
+        courses = self.course_agent.recommend(
+            skill_gap["missing_skills"]
+        )
+
+        # Agent 5
+        roadmap = self.roadmap_agent.create(
+            skill_gap["missing_skills"]
+        )
+
+        return {
+            "profile": profile_analysis,
+            "careers": careers,
+            "best_career": best_career,
+            "skill_gap": skill_gap,
+            "courses": courses,
+            "roadmap": roadmap
+        }
+
+
+# -------------------------------------------------
+# AI CHAT AGENT
+# -------------------------------------------------
+
+def generate_ai_response(message, profile):
+
+    if not client:
+
+        return (
+            "AI API is not configured yet. "
+            "However, I can still analyze your "
+            "career profile using the built-in agents."
+        )
+
+    prompt = f"""
+You are CareerAI, an intelligent career counselor.
+
+Student Profile:
+{profile.model_dump_json(indent=2)}
+
+Student Question:
+{message}
+
+Give practical, personalized and concise career guidance.
+
+Do not make absolute promises about jobs or salary.
+Explain your reasoning clearly.
+"""
+
+    response = client.responses.create(
+        model="gpt-4.1-mini",
+        input=prompt
+    )
+
+    return response.output_text
