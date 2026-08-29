@@ -1,10 +1,8 @@
 import cv2
 import numpy as np
 import time
-
 THRESHOLD = 20
 N = 12
-
 CIRCLE = [
     (-3, 0), (-3, 1), (-2, 2), (-1, 3),
     (0, 3), (1, 3), (2, 2), (3, 1),
@@ -193,78 +191,52 @@ def fast_corner_test(gray, x, y, threshold=20):
     return max_bright >= N or max_dark >= N
 
 def detect_fast(gray, threshold=20):
-
     h, w = gray.shape
-
     corners = []
-
     for y in range(3, h - 3):
-
         for x in range(3, w - 3):
-
             if fast_corner_test(gray, x, y, threshold):
                 corners.append((x, y))
-
     return corners
 
 def non_maximum_suppression(gray, corners):
-
     if len(corners) == 0:
         return []
-
     scores = []
-
     # Calculate strength of every detected corner
     for x, y in corners:
-
         center = int(gray[y, x])
         score = 0
-
         for dx, dy in CIRCLE:
             value = int(gray[y + dy, x + dx])
             score += abs(value - center)
-
         scores.append((score, x, y))
-
     # Strongest corners first
     scores.sort(reverse=True)
-
     selected = []
-
     # Minimum distance between corners
     min_distance = 5
-
     for score, x, y in scores:
-
         keep = True
-
         for sx, sy in selected:
-
             distance = (x - sx) ** 2 + (y - sy) ** 2
-
             if distance < min_distance ** 2:
                 keep = False
                 break
-
         if keep:
             selected.append((x, y))
-
     return selected
 # Read image
 img = cv2.imread("test_image.jpg")
-
 # Check if image was found
 if img is None:
     print("ERROR: test_image.jpg not found!")
     exit()
-
 # Convert image to grayscale
 gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
 # Detect FAST corners
 corners = detect_fast(gray, THRESHOLD)
 corners = non_maximum_suppression(gray, corners)
-
 # Print number of corners
 print("Number of corners detected:", len(corners))
 
